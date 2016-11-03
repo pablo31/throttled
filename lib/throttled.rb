@@ -8,16 +8,19 @@ class Throttled
   BLOCKED_KEY = 'throttled:blocked:%{token}'
 
   attr_accessor :redis, :window_in_seconds, :rate_limit_in_window, :waiting_quota_in_seconds
+  attr_accessor :logger
 
   def initialize(redis=nil, window_in_seconds=nil, rate_limit_in_window=nil, waiting_quota_in_seconds=nil)
     self.redis = redis || Configuration.redis_client
     self.window_in_seconds = window_in_seconds
     self.rate_limit_in_window = rate_limit_in_window
     self.waiting_quota_in_seconds = waiting_quota_in_seconds
+    self.logger = Configuration.logger
   end
 
   def limit_call(token)
     if blocked?(token)
+      logger.info "Token '#{token}' blocked"
       raise TokenBlockedError.new(token)
     else
       check_rate(token)
@@ -35,6 +38,7 @@ class Throttled
     loop do
       break if has_quota? token
       raise TokenTimeoutError.new(token) if waiting_time >= waiting_quota_in_seconds
+      logger.debug "Waiting quota for '#{token}'"
       sleep(1)
       waiting_time += 1
     end
@@ -47,9 +51,11 @@ class Throttled
       multi.incr(key)
       multi.expire(key, window_in_seconds)
     end
+    logger.debug "Call registered for '#{token}'"
   end
 
   def limit_reached(token, expiration, now=nil)
+    logger.info "Limit reached registered for '#{token}'"
     now ||= Time.now
     now_int = now.to_i
     key = blocked_key_for token
@@ -102,5 +108,8 @@ require 'throttled/version'
 require 'throttled/token_error'
 require 'throttled/token_blocked_error'
 require 'throttled/token_timeout_error'
+
+require 'throttled/loggers/default_logger'
+require 'throttled/loggers/silent_logger'
 
 require 'throttled/configuration'
